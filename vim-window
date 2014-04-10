@@ -1,0 +1,111 @@
+#!/bin/bash
+
+GEM_DIR="/home/judson/ruby/bundle-paths/rails3/lib/ruby/1.9.1/gems"
+switch_to="yes"
+sticky_role="no"
+
+function usage_and_exit {
+  echo "Usage: $0 [-r <role>] [-n <line number>] <file[:line number]>"
+  exit 0
+}
+
+
+while getopts Shsr:n: OPTION
+do
+  case $OPTION in
+    S)
+      switch_to=no
+      ;;
+    s)
+      switch_to=yes
+      ;;
+    h)
+      usage_and_exit
+      ;;
+    r)
+      editor_role=$OPTARG
+      ;;
+    n)
+      line_number=$OPTARG
+      ;;
+  esac
+done
+
+shift $(($OPTIND - 1))
+
+if [ $# -lt 1 ]; then
+  usage_and_exit
+fi
+
+if [ -z $TMUX ]; then
+  echo "No tmux session for this terminal!"
+  exit 1
+fi
+
+while (( $# )); do
+  filename=$1
+
+  if [ -z $editor_role ]; then
+    editor_role="app"
+    case $(realpath $filename) in
+      (**/spec/**|**/test/**) editor_role="test";;
+      (**/views/**|**/app/assets/stylesheets/**) editor_role="views";;
+      (**/judson/.vim/**) editor_role="vim_config";;
+      (**/judson/bin/**) editor_role="tool_scripts";;
+      (*.gemspec|Gemfile*) editor_role="rubygem";;
+      (+[:upper:]?.*) editor_role="doc";;
+      (**/1.9.1/gems/**) editor_role="gem_review";;
+    esac
+  fi
+
+  if [ -z $line_number ]; then
+    if echo $filename | egrep -q ':[0-9]+$'; then
+      line_number=$(echo $filename | sed 's/.*://')
+      filename=$(echo $filename | sed 's/:[^:]*//')
+    fi
+  fi
+
+  servername="TMUXVIM"
+  existing_editor=$(tmux-engine.rb find-variable --server_prefix $servername vwrole $editor_role)
+
+  if [ -z $existing_editor ]; then
+    echo "Starting new editor for [$editor_role]"
+    vimcmd="vim --servername $servername -c \"set hidden\" -c \":let g:vwrole='$editor_role'\""
+
+    if [ ! -z $line_number ]; then
+      vimcmd="$vimcmd +${line_number}"
+    fi
+    vimcmd="$vimcmd $filename"
+    switch_arg="d"
+    if [ "$switch_to" == "yes" ]; then
+      switch_arg=""
+    fi
+    echo "tmux new-window -n$switch_arg \"Vim[$editor_role]\" \"$vimcmd\""
+    tmux new-window -n$switch_arg "Vim[$editor_role]" "$vimcmd"
+  else
+    vimcmd="vim --servername $existing_editor"
+
+    existing_pane=$(tmux-engine.rb locate-vim $existing_editor --pane)
+    existing_window=$(echo $existing_pane | sed 's/\..*//')
+
+    echo "Found existing Vim for [$editor_role]: $existing_editor @ $existing_pane"
+
+    basecmd=$vimcmd
+    vimcmd="$vimcmd --remote $filename"
+    echo $vimcmd
+    $vimcmd
+
+    if [ ! -z $line_number ]; then
+      linecmd="$basecmd --remote-send ${line_number}G"
+      echo $linecmd
+      ( sleep 1; $linecmd )&
+    fi
+
+    tmux select-pane -t $existing_pane
+    if [ $switch_to == "yes" ]; then
+      tmux select-window -t $existing_window
+    fi
+  fi
+
+  shift
+done

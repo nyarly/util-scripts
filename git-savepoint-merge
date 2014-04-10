@@ -1,0 +1,19 @@
+#!/bin/env bash
+
+if [ $# -lt 1 ]; then
+  echo "Need some origin/branches!"
+  exit 1
+fi
+
+git branch savepoint || exit 1
+
+for branch in $*; do
+  echo "git pull $(echo $branch | sed 's#/# #')" >> .git/merges.sh
+done
+
+source .git/merges.sh || exit 1
+
+git difftool -d savepoint &
+bundle || exit 1
+rake db:migrate
+rspec spec

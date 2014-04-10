@@ -1,0 +1,20 @@
+#!/bin/bash
+
+branches=$(git branch --merged | egrep -v '(^[*])|(master)|(staging)|(production)')
+echo $branches
+
+for branch in $branches; do
+  echo Cleaning: $branch
+  #If we can delete the branch remotely, delete it locally
+  git push origin :$branch && git branch -d $branch
+  if [ $branch == "merging" ]; then
+    git branch -d $branch
+  fi
+done
+
+remotes=$(git remote)
+for remote in $remotes; do
+  git remote prune $remote
+done
+
+git gc
